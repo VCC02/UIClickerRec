@@ -210,26 +210,32 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
         Width = 100
       end    
       item
-        MinWidth = 400
+        MinWidth = 150
         Position = 3
-        Text = 'Action text / class'
-        Width = 400
+        Text = 'Action class'
+        Width = 150
+      end    
+      item
+        MinWidth = 200
+        Position = 4
+        Text = 'Action text'
+        Width = 200
       end    
       item
         MinWidth = 70
-        Position = 4
+        Position = 5
         Text = 'Handle'
         Width = 70
       end    
       item
         MinWidth = 150
-        Position = 5
+        Position = 6
         Text = 'Timestamp'
         Width = 150
       end    
       item
         MinWidth = 100
-        Position = 6
+        Position = 7
         Text = 'Global XY'
         Width = 100
       end>
@@ -238,11 +244,12 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
     StateImages = imglstActions16
     TabOrder = 8
     TreeOptions.SelectionOptions = [toFullRowSelect, toMultiSelect]
-    OnClick = vstRecClick
     OnGetText = vstRecGetText
     OnGetImageIndex = vstRecGetImageIndex
     OnGetImageIndexEx = vstRecGetImageIndexEx
     OnKeyDown = vstRecKeyDown
+    OnMouseDown = vstRecMouseDown
+    OnMouseUp = vstRecMouseUp
   end
   object btnCopySelectedActionsToClipboard: TButton
     Left = 288

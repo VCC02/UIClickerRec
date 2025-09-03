@@ -84,7 +84,6 @@ type
     procedure tmrBlinkRecTimer(Sender: TObject);
     procedure tmrMouseMoveDebounceTimer(Sender: TObject);
     procedure tmrRecTimer(Sender: TObject);
-    procedure vstRecClick(Sender: TObject);
     procedure vstRecGetImageIndex(Sender: TBaseVirtualTree; Node: PVirtualNode;
       Kind: TVTImageKind; Column: TColumnIndex; var Ghosted: boolean;
       var ImageIndex: integer);
@@ -95,6 +94,10 @@ type
     procedure vstRecGetText(Sender: TBaseVirtualTree; Node: PVirtualNode;
       Column: TColumnIndex; TextType: TVSTTextType; var CellText: string);
     procedure vstRecKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure vstRecMouseDown(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
+    procedure vstRecMouseUp(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
   private
     FLeftButtonDown: Boolean;
     FRightButtonDown: Boolean;
@@ -121,6 +124,7 @@ type
     FLastPosMiddle: TPoint;  //Middle button
 
     FAllRecs: TRecordingArr;
+    FHitTimeStamp: QWord;
 
     procedure AddToLog(s: string);
     procedure DisplayMouseButtonStates;
@@ -356,21 +360,6 @@ begin
 end;
 
 
-procedure TfrmUIClickerRecMain.vstRecClick(Sender: TObject);
-var
-  Node: PVirtualNode;
-begin
-  Node := vstRec.GetFirstSelected;
-  if Node = nil then
-    Exit;
-
-  try
-    imgPreview.Picture.Bitmap.Assign(FAllRecs[0].Details[Node^.Index].ScrShot);
-  except
-  end;
-end;
-
-
 procedure TfrmUIClickerRecMain.vstRecGetImageIndex(Sender: TBaseVirtualTree;
   Node: PVirtualNode; Kind: TVTImageKind; Column: TColumnIndex;
   var Ghosted: boolean; var ImageIndex: integer);
@@ -402,23 +391,25 @@ begin
     0: CellText := IntToStr(Node^.Index);
     1: CellText := FAllRecs[0].Actions[Node^.Index].ActionOptions.ActionName;
     2: CellText := CClkActionStr[FAllRecs[0].Actions[Node^.Index].ActionOptions.Action];
-    3:
+    3: CellText := FAllRecs[0].Actions[Node^.Index].FindControlOptions.MatchClassName;
+
+    4:
     begin
       case FAllRecs[0].Actions[Node^.Index].ActionOptions.Action of
         acClick:
           CellText := FAllRecs[0].Actions[Node^.Index].ActionOptions.ActionName;
 
         acFindControl:
-          CellText := FAllRecs[0].Actions[Node^.Index].FindControlOptions.MatchText + ' / ' + FAllRecs[0].Actions[Node^.Index].FindControlOptions.MatchClassName;
+          CellText := FAllRecs[0].Actions[Node^.Index].FindControlOptions.MatchText;
 
         else
           CellText := 'Unimplemented';
       end;
     end;
 
-    4: CellText := IntToStr(FAllRecs[0].Details[Node^.Index].ControlHandle);
-    5: CellText := DateTimeToStr(FAllRecs[0].Details[Node^.Index].Timestamp);
-    6: CellText := IntToStr(FAllRecs[0].Details[Node^.Index].ClickPoint.X) + ':' + IntToStr(FAllRecs[0].Details[Node^.Index].ClickPoint.Y);
+    5: CellText := IntToStr(FAllRecs[0].Details[Node^.Index].ControlHandle);
+    6: CellText := DateTimeToStr(FAllRecs[0].Details[Node^.Index].Timestamp);
+    7: CellText := IntToStr(FAllRecs[0].Details[Node^.Index].ClickPoint.X) + ' : ' + IntToStr(FAllRecs[0].Details[Node^.Index].ClickPoint.Y);
   end;
 end;
 
@@ -432,6 +423,32 @@ begin
       Ord('C'):
         CopySelectedActionsToClipboard;
 
+    end;
+  end;
+end;
+
+
+procedure TfrmUIClickerRecMain.vstRecMouseDown(Sender: TObject;
+  Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  FHitTimeStamp := GetTickCount64; //required on MouseUp
+end;
+
+
+procedure TfrmUIClickerRecMain.vstRecMouseUp(Sender: TObject;
+  Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  Node: PVirtualNode;
+begin
+  if GetTickCount64 - FHitTimeStamp < 500 then  //This check is required, when double-clicking a file, in an OpenDialog, over vstRec.
+  begin;                                        //The dialog closes at the second MouseDown event of the double-click action, while the second MouseUp triggers this (vstRecMouseUp) handler.
+    Node := vstRec.GetFirstSelected;
+    if Node = nil then
+      Exit;
+
+    try
+      imgPreview.Picture.Bitmap.Assign(FAllRecs[0].Details[Node^.Index].ScrShot);
+    except
     end;
   end;
 end;
@@ -471,7 +488,7 @@ var
   Comp: TCompRec;
 begin
   Comp := GetWindowClassRec(APoint);
-  Result := IntToStr(APoint.X) + ':' + IntToStr(APoint.Y) + ' (' + Comp.ClassName + ' / ' + Comp.Text + ' / ' + IntToStr(Comp.Handle) + ')';
+  Result := IntToStr(APoint.X) + ' : ' + IntToStr(APoint.Y) + ' (' + Comp.ClassName + ' / ' + Comp.Text + ' / ' + IntToStr(Comp.Handle) + ')';
   Result := FastReplace_0To1(Result);
 end;
 
@@ -498,23 +515,19 @@ begin
 end;
 
 
-procedure GetControlParentTree(ACompHandle: THandle; var ATree: TCompRecArr);
+procedure GetControlParentTree(AComp: TCompRec; var ATree: TCompRecArr);
 var
-  TempComp, CompL, CompT, CompR, CompB: TCompRec;
+  CompL, CompT, CompR, CompB: TCompRec;
   TargetProcID, ProcIDRes, ProcIDL, ProcIDT, ProcIDR, ProcIDB: DWord;
   TpL, TpU, TpR, TpB: TPoint;
   TreeLen: Integer;
   Found: Boolean;
 begin
-  if ACompHandle = 0 then
-    Exit;
-
-  TempComp := GetWindowClassRec(ACompHandle);
-  if TempComp.Handle = 0 then
+  if AComp.Handle = 0 then
     Exit;
 
   {$IFDEF Windows}
-    ProcIDRes := GetWindowThreadProcessId(ACompHandle, @TargetProcID);
+    ProcIDRes := GetWindowThreadProcessId(AComp.Handle, @TargetProcID);
     if ProcIDRes = 0 then
     begin
       //AddToLog
@@ -525,9 +538,9 @@ begin
   {$ENDIF}
 
   SetLength(ATree, 1);
-  ATree[0] := TempComp;
+  ATree[0] := AComp;
 
-  if FindWindow(PChar(TempComp.ClassName), PChar(TempComp.Text)) > 0 then
+  if FindWindow(PChar(AComp.ClassName), PChar(AComp.Text)) > 0 then
     Exit;
 
   TreeLen := 0;
@@ -681,7 +694,7 @@ begin
     Exit;
 
   CurrentNow := Now;
-  GetControlParentTree(CompUp.Handle, Tree);
+  GetControlParentTree(CompUp, Tree);
   AddFindControlAndClickActions(Tree, 'Click', mbLeft, CurrentNow);
 end;
 
@@ -754,7 +767,7 @@ begin
       Exit;
 
     CurrentNow := Now;
-    GetControlParentTree(CompUp.Handle, Tree);
+    GetControlParentTree(CompUp, Tree);
     AddFindControlAndClickActions(Tree, 'Click', mbLeft, CurrentNow);
   end;
 end;
@@ -797,7 +810,7 @@ begin
       Exit;
 
     CurrentNow := Now;
-    GetControlParentTree(CompUp.Handle, Tree);
+    GetControlParentTree(CompUp, Tree);
     AddFindControlAndClickActions(Tree, 'Right-Click', mbRight, CurrentNow);
   end;
 end;
@@ -827,7 +840,7 @@ begin
       Exit;
 
     CurrentNow := Now;
-    GetControlParentTree(CompUp.Handle, Tree);
+    GetControlParentTree(CompUp, Tree);
     AddFindControlAndClickActions(Tree, 'Middle-Click', mbMiddle, CurrentNow);
   end;
 end;
