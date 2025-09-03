@@ -6,6 +6,7 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
   Caption = 'UIClicker Rec'
   ClientHeight = 417
   ClientWidth = 665
+  Color = 16444382
   Constraints.MinHeight = 376
   Constraints.MinWidth = 502
   LCLVersion = '8.4'
@@ -39,6 +40,7 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
     Caption = 'Mouse buttons'
     ClientHeight = 28
     ClientWidth = 116
+    ParentBackground = False
     TabOrder = 1
     object pnlLeft: TPanel
       Left = 8
@@ -142,6 +144,7 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
     Caption = 'Mouse actions'
     ClientHeight = 28
     ClientWidth = 100
+    ParentBackground = False
     TabOrder = 6
     object pnlMouseMove: TPanel
       Left = 8

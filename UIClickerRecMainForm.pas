@@ -126,6 +126,7 @@ type
     procedure DisplayMouseButtonStates;
     function GetSelectedActions(var AActionsArr: TClkActionsRecArr): Integer;
     procedure CopySelectedActionsToClipboard;
+    procedure AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime);
 
     procedure HandleOnLeftButtonDown;
     procedure HandleOnRightButtonDown;
@@ -497,18 +498,178 @@ begin
 end;
 
 
+procedure GetControlParentTree(ACompHandle: THandle; var ATree: TCompRecArr);
+var
+  TempComp, CompL, CompT, CompR, CompB: TCompRec;
+  TargetProcID, ProcIDRes, ProcIDL, ProcIDT, ProcIDR, ProcIDB: DWord;
+  TpL, TpU, TpR, TpB: TPoint;
+  TreeLen: Integer;
+  Found: Boolean;
+begin
+  if ACompHandle = 0 then
+    Exit;
+
+  TempComp := GetWindowClassRec(ACompHandle);
+  if TempComp.Handle = 0 then
+    Exit;
+
+  {$IFDEF Windows}
+    ProcIDRes := GetWindowThreadProcessId(ACompHandle, @TargetProcID);
+    if ProcIDRes = 0 then
+    begin
+      //AddToLog
+      Exit;
+    end;
+  {$ELSE}
+    Exit;
+  {$ENDIF}
+
+  SetLength(ATree, 1);
+  ATree[0] := TempComp;
+
+  if FindWindow(PChar(TempComp.ClassName), PChar(TempComp.Text)) > 0 then
+    Exit;
+
+  TreeLen := 0;
+  repeat
+    TpL.X := ATree[Length(ATree) - 1].ComponentRectangle.Left - 1;
+    TpL.Y := ATree[Length(ATree) - 1].ComponentRectangle.Top;
+
+    TpU.X := ATree[Length(ATree) - 1].ComponentRectangle.Left;
+    TpU.Y := ATree[Length(ATree) - 1].ComponentRectangle.Top - 1;
+
+    TpR.X := ATree[Length(ATree) - 1].ComponentRectangle.Right + 1;
+    TpR.Y := ATree[Length(ATree) - 1].ComponentRectangle.Top;
+
+    TpB.X := ATree[Length(ATree) - 1].ComponentRectangle.Left;
+    TpB.Y := ATree[Length(ATree) - 1].ComponentRectangle.Bottom + 1;
+
+    CompL := GetWindowClassRec(TpL);
+    CompT := GetWindowClassRec(TpU);
+    CompR := GetWindowClassRec(TpR);
+    CompB := GetWindowClassRec(TpB);
+
+    GetWindowThreadProcessId(CompL.Handle, @ProcIDL);
+    GetWindowThreadProcessId(CompT.Handle, @ProcIDT);
+    GetWindowThreadProcessId(CompR.Handle, @ProcIDR);
+    GetWindowThreadProcessId(CompB.Handle, @ProcIDB);
+
+    Found := False;
+    if (ProcIDL = TargetProcID) and (CompL.Handle > 0) then
+    begin
+      SetLength(ATree, Length(ATree) + 1);
+      ATree[Length(ATree) - 1] := CompL;
+      Inc(TreeLen);
+      Found := True;
+
+      if CompL.Text > '' then  //There are windows with no caption (title), but they should be handled manually.
+        if FindWindow(PChar(CompL.ClassName), PChar(CompL.Text)) > 0 then
+          Break;
+    end;
+
+    if (ProcIDT = TargetProcID) and (CompT.Handle > 0) and not Found then
+    begin
+      SetLength(ATree, Length(ATree) + 1);
+      ATree[Length(ATree) - 1] := CompT;
+      Inc(TreeLen);
+      Found := True;
+
+      if CompT.Text > '' then  //There are windows with no caption (title), but they should be handled manually.
+        if FindWindow(PChar(CompT.ClassName), PChar(CompT.Text)) > 0 then
+          Break;
+    end;
+
+    if (ProcIDR = TargetProcID) and (CompR.Handle > 0) and not Found then
+    begin
+      SetLength(ATree, Length(ATree) + 1);
+      ATree[Length(ATree) - 1] := CompR;
+      Inc(TreeLen);
+      Found := True;
+
+      if CompR.Text > '' then  //There are windows with no caption (title), but they should be handled manually.
+        if FindWindow(PChar(CompR.ClassName), PChar(CompR.Text)) > 0 then
+          Break;
+    end;
+
+    if (ProcIDB = TargetProcID) and (CompB.Handle > 0) and not Found then
+    begin
+      SetLength(ATree, Length(ATree) + 1);
+      ATree[Length(ATree) - 1] := CompB;
+      Inc(TreeLen);
+      Found := True;
+
+      if CompB.Text > '' then  //There are windows with no caption (title), but they should be handled manually.
+        if FindWindow(PChar(CompB.ClassName), PChar(CompB.Text)) > 0 then
+          Break;
+    end;
+
+    if not Found then
+      Break;
+  until TreeLen > 100;
+end;
+
+
+procedure TfrmUIClickerRecMain.AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime);
+var
+  i: Integer;
+begin
+  for i := Length(ATree) - 1 downto 0 do
+    //if CompUp.Handle <> GetLastRecordedHandle(FAllRecs[0].Details) then  //makes no sense to check this, when starting from the top of the tree
+    begin
+      SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
+      SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
+      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := ACurrentNow;
+      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
+      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := ATree[i].Handle;
+      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
+      ScreenShot(ATree[i].Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, ATree[i].ComponentRectangle.Width, ATree[i].ComponentRectangle.Height);
+      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindControl;
+      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindControl';
+      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
+      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionTimeout := 3000;
+
+      GetDefaultPropertyValues_FindControl(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions);
+      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchText := ATree[i].Text;
+      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchClassName := ATree[i].ClassName;
+      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.UseWholeScreen := i = Length(ATree) - 1;
+    end;
+
+  //Click
+  SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
+  SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := ACurrentNow;
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := ATree[0].Handle;
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
+  ScreenShot(ATree[0].Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, ATree[0].ComponentRectangle.Width, ATree[0].ComponentRectangle.Height);
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Pen.Color := clRed;
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(ATree[0].MouseXOffset, 0, ATree[0].MouseXOffset, ATree[0].ComponentRectangle.Height); //V
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(0, ATree[0].MouseYOffset, ATree[0].ComponentRectangle.Width, ATree[0].MouseYOffset); //H
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acClick;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := AClickActionName;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
+
+  GetDefaultPropertyValues_Click(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions);
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.MouseButton := AMouseButton;
+
+  vstRec.RootNodeCount := Length(FAllRecs[0].Actions);
+  vstRec.ClearSelection;
+  vstRec.Selected[vstRec.GetLast] := True;
+  vstRec.Repaint;
+end;
+
+
 procedure TfrmUIClickerRecMain.HandleOnLeftButtonDown;
 var
   CompUp: TCompRec;
   CurrentNow: TDateTime;
+  Tree: TCompRecArr;
 begin
   FLastPosLeft := FLastPos;
   AddToLog('Left down on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
   //Special handling of MouseDown, as MouseClick, on menus, which react on MouseDown, so there would be no MouseUp to define a click:
   CompUp := GetWindowClassRec(FLastPosLeft);
-  if not ((CompUp.ClassName = '#32768') and (CompUp.Text = '')) then //system menu  - unfortunately, there are other windows with this handle
-    Exit; //other menus (classes and other info) should be added, in order to identify components which are destroyed on MouseDown
 
   if not chkIncludeThisRecorder.Checked and
     ((CompUp.Handle = Handle) or
@@ -520,45 +681,8 @@ begin
     Exit;
 
   CurrentNow := Now;
-
-  if CompUp.Handle <> GetLastRecordedHandle(FAllRecs[0].Details) then  // Add the FindControl action, only if the handle is different than previous FindSubControl. Better than that, if the control tree is different.
-  begin
-    SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
-    SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := CurrentNow;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := CompUp.Handle;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
-    ScreenShot(CompUp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, CompUp.ComponentRectangle.Width, CompUp.ComponentRectangle.Height);
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindControl;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindControl';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
-
-    GetDefaultPropertyValues_FindControl(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions);
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchText := CompUp.Text;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchClassName := CompUp.ClassName;
-  end;
-  //Click
-  SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
-  SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
-  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := CurrentNow;
-  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
-  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := CompUp.Handle;
-  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
-  ScreenShot(CompUp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, CompUp.ComponentRectangle.Width, CompUp.ComponentRectangle.Height);
-  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Pen.Color := clRed;
-  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(CompUp.MouseXOffset, 0, CompUp.MouseXOffset, CompUp.ComponentRectangle.Height); //V
-  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(0, CompUp.MouseYOffset, CompUp.ComponentRectangle.Width, CompUp.MouseYOffset); //H
-  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acClick;
-  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'Click';
-  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
-
-  GetDefaultPropertyValues_Click(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions);
-
-  vstRec.RootNodeCount := Length(FAllRecs[0].Actions);
-  vstRec.ClearSelection;
-  vstRec.Selected[vstRec.GetLast] := True;
-  vstRec.Repaint;
+  GetControlParentTree(CompUp.Handle, Tree);
+  AddFindControlAndClickActions(Tree, 'Click', mbLeft, CurrentNow);
 end;
 
 
@@ -576,16 +700,47 @@ begin
 end;
 
 
+function IsMenu(AComp: TCompRec): Boolean;
+begin
+  Result := True;
+  if not ((AComp.ClassName = '#32768') and (AComp.Text = '')) then //system menu  - unfortunately, there are other windows with this handle
+    Exit; //other menus (classes and other info) should be added, in order to identify components which are destroyed on MouseDown
+
+  Result := False;
+end;
+
+
+function IsSelfClosingComponent(AComp: TCompRec): Boolean;
+begin
+  Result := True;
+
+  if IsMenu(AComp) then
+    Exit;
+
+  if not ((AComp.ClassName = 'Button') and ((AComp.Text = '&Yes') or (AComp.Text = '&No') or (AComp.Text = 'OK'))) then //MessageBox buttons
+    Exit;              //ParentClass = '#32770
+
+  if not ((AComp.ClassName = 'Button') and ((AComp.Text = '&Open') or (AComp.Text = '&Save') or (AComp.Text = 'Select Folder') or (AComp.Text = 'Cancel'))) then //Open/Save dialog buttons
+    Exit;              //ParentClass = '#32770
+
+  Result := False;
+end;
+
+
 procedure TfrmUIClickerRecMain.HandleOnLeftButtonUp;
 var
   CompDown: TCompRec;
   CompUp: TCompRec;
   CurrentNow: TDateTime;
+  Tree: TCompRecArr;
 begin
   AddToLog('Left up on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
   CompDown := GetWindowClassRec(FLastPosLeft);
   CompUp := GetWindowClassRec(FLastPos);
+
+  if IsSelfClosingComponent(CompDown) then
+    Exit;
 
   if (CompUp.Handle = CompDown.Handle) and (Abs(FLastPos.X - FLastPosLeft.X) < 6) and (Abs(FLastPos.Y - FLastPosLeft.Y) < 6) then
   begin
@@ -599,45 +754,8 @@ begin
       Exit;
 
     CurrentNow := Now;
-
-    if CompUp.Handle <> GetLastRecordedHandle(FAllRecs[0].Details) then  // Add the FindControl action, only if the handle is different than previous FindSubControl. Better than that, if the control tree is different.
-    begin
-      SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
-      SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := CurrentNow;
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := CompUp.Handle;
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
-      ScreenShot(CompUp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, CompUp.ComponentRectangle.Width, CompUp.ComponentRectangle.Height);
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindControl;
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindControl';
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
-
-      GetDefaultPropertyValues_FindControl(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions);
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchText := CompUp.Text;
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchClassName := CompUp.ClassName;
-    end;
-    //Click
-    SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
-    SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := CurrentNow;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := CompUp.Handle;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
-    ScreenShot(CompUp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, CompUp.ComponentRectangle.Width, CompUp.ComponentRectangle.Height);
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Pen.Color := clRed;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(CompUp.MouseXOffset, 0, CompUp.MouseXOffset, CompUp.ComponentRectangle.Height); //V
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(0, CompUp.MouseYOffset, CompUp.ComponentRectangle.Width, CompUp.MouseYOffset); //H
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acClick;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'Click';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
-
-    GetDefaultPropertyValues_Click(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions);
-
-    vstRec.RootNodeCount := Length(FAllRecs[0].Actions);
-    vstRec.ClearSelection;
-    vstRec.Selected[vstRec.GetLast] := True;
-    vstRec.Repaint;
+    GetControlParentTree(CompUp.Handle, Tree);
+    AddFindControlAndClickActions(Tree, 'Click', mbLeft, CurrentNow);
   end;
 end;
 
@@ -647,11 +765,14 @@ var
   CompDown: TCompRec;
   CompUp: TCompRec;
   CurrentNow: TDateTime;
+  Tree: TCompRecArr;
 begin
   AddToLog('Right up on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
   CompDown := GetWindowClassRec(FLastPosRight);
   CompUp := GetWindowClassRec(FLastPos);
+
+  //if IsMenu then  Exit;
 
   if (CompUp.ClassName = '#32768') and (CompUp.ComponentRectangle.Left = FLastPos.X) and (CompUp.ComponentRectangle.Top = FLastPos.Y) then //system menu
   begin                 //Handled only the case where the pop-up menu opens to the right-bottom of the mouse cursor.
@@ -676,46 +797,8 @@ begin
       Exit;
 
     CurrentNow := Now;
-
-    if CompUp.Handle <> GetLastRecordedHandle(FAllRecs[0].Details) then
-    begin
-      SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
-      SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := CurrentNow;
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := CompUp.Handle;
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
-      ScreenShot(CompUp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, CompUp.ComponentRectangle.Width, CompUp.ComponentRectangle.Height);
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindControl;
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindControl';
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
-
-      GetDefaultPropertyValues_FindControl(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions);
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchText := CompUp.Text;
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchClassName := CompUp.ClassName;
-    end;
-    //Click
-    SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
-    SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := CurrentNow;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := CompUp.Handle;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
-    ScreenShot(CompUp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, CompUp.ComponentRectangle.Width, CompUp.ComponentRectangle.Height);
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Pen.Color := clRed;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(CompUp.MouseXOffset, 0, CompUp.MouseXOffset, CompUp.ComponentRectangle.Height); //V
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(0, CompUp.MouseYOffset, CompUp.ComponentRectangle.Width, CompUp.MouseYOffset); //H
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acClick;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'Right-Click';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
-
-    GetDefaultPropertyValues_Click(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions);
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.MouseButton := mbRight;
-
-    vstRec.RootNodeCount := Length(FAllRecs[0].Actions);
-    vstRec.ClearSelection;
-    vstRec.Selected[vstRec.GetLast] := True;
-    vstRec.Repaint;
+    GetControlParentTree(CompUp.Handle, Tree);
+    AddFindControlAndClickActions(Tree, 'Right-Click', mbRight, CurrentNow);
   end;
 end;
 
@@ -725,6 +808,7 @@ var
   CompDown: TCompRec;
   CompUp: TCompRec;
   CurrentNow: TDateTime;
+  Tree: TCompRecArr;
 begin
   AddToLog('Middle up on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
@@ -743,46 +827,8 @@ begin
       Exit;
 
     CurrentNow := Now;
-
-    if CompUp.Handle <> GetLastRecordedHandle(FAllRecs[0].Details) then
-    begin
-      SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
-      SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := CurrentNow;
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := CompUp.Handle;
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
-      ScreenShot(CompUp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, CompUp.ComponentRectangle.Width, CompUp.ComponentRectangle.Height);
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindControl;
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindControl';
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
-
-      GetDefaultPropertyValues_FindControl(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions);
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchText := CompUp.Text;
-      FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchClassName := CompUp.ClassName;
-    end;
-    //Click
-    SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
-    SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := CurrentNow;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := CompUp.Handle;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
-    ScreenShot(CompUp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, CompUp.ComponentRectangle.Width, CompUp.ComponentRectangle.Height);
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Pen.Color := clRed;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(CompUp.MouseXOffset, 0, CompUp.MouseXOffset, CompUp.ComponentRectangle.Height); //V
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(0, CompUp.MouseYOffset, CompUp.ComponentRectangle.Width, CompUp.MouseYOffset); //H
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acClick;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'Middle-Click';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
-
-    GetDefaultPropertyValues_Click(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions);
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.MouseButton := mbMiddle;
-
-    vstRec.RootNodeCount := Length(FAllRecs[0].Actions);
-    vstRec.ClearSelection;
-    vstRec.Selected[vstRec.GetLast] := True;
-    vstRec.Repaint;
+    GetControlParentTree(CompUp.Handle, Tree);
+    AddFindControlAndClickActions(Tree, 'Middle-Click', mbMiddle, CurrentNow);
   end;
 end;
 
