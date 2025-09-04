@@ -37,6 +37,7 @@ type
     ControlHandle: THandle;
     ClickPoint: TPoint;
     Timestamp: TDateTime;
+    GroupID: string; //all generated actions from an event should have the same ID
     ScrShot: TBitmap;
   end;
 
@@ -54,6 +55,7 @@ type
   TfrmUIClickerRecMain = class(TForm)
     btnCopySelectedActionsToClipboard: TButton;
     btnClearRecording: TButton;
+    chkIncludeFindSubControl: TCheckBox;
     chkIncludeThisRecorder: TCheckBox;
     chkUnconditionalScreenshots: TCheckBox;
     chkRec: TCheckBox;
@@ -625,7 +627,10 @@ end;
 procedure TfrmUIClickerRecMain.AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime);
 var
   i: Integer;
+  LocalGroupID: string;
 begin
+  LocalGroupID := DateTimeToStr(ACurrentNow) + IntToStr(GetTickCount64);
+
   for i := Length(ATree) - 1 downto 0 do
     //if CompUp.Handle <> GetLastRecordedHandle(FAllRecs[0].Details) then  //makes no sense to check this, when starting from the top of the tree
     begin
@@ -636,6 +641,8 @@ begin
       FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := ATree[i].Handle;
       FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
       ScreenShot(ATree[i].Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, ATree[i].ComponentRectangle.Width, ATree[i].ComponentRectangle.Height);
+      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := LocalGroupID;
+
       FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindControl;
       FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindControl';
       FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
@@ -647,6 +654,26 @@ begin
       FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.UseWholeScreen := i = Length(ATree) - 1;
     end;
 
+  if chkIncludeFindSubControl.Checked then
+  begin
+    SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
+    SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
+    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := ACurrentNow;
+    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
+    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := ATree[i].Handle;
+    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
+    ScreenShot(ATree[i].Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, ATree[i].ComponentRectangle.Width, ATree[i].ComponentRectangle.Height);
+    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := LocalGroupID;
+
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindSubControl;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindSubControl';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionTimeout := 1000;
+
+    GetDefaultPropertyValues_FindSubControl(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions);
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := ATree[i].Text;
+  end;
+
   //Click
   SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
   SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
@@ -655,6 +682,8 @@ begin
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := ATree[0].Handle;
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
   ScreenShot(ATree[0].Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, ATree[0].ComponentRectangle.Width, ATree[0].ComponentRectangle.Height);
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := LocalGroupID;
+
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Pen.Color := clRed;
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(ATree[0].MouseXOffset, 0, ATree[0].MouseXOffset, ATree[0].ComponentRectangle.Height); //V
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(0, ATree[0].MouseYOffset, ATree[0].ComponentRectangle.Width, ATree[0].MouseYOffset); //H

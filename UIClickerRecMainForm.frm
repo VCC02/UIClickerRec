@@ -198,10 +198,10 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
         Text = '#'
       end    
       item
-        MinWidth = 100
+        MinWidth = 115
         Position = 1
         Text = 'Action name'
-        Width = 200
+        Width = 115
       end    
       item
         MinWidth = 100
@@ -283,6 +283,19 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
     Top = 7
     Width = 140
     AutoSize = True
+  end
+  object chkIncludeFindSubControl: TCheckBox
+    Left = 8
+    Height = 19
+    Hint = 'Include a FindSubControl before any Click or Drag action.'#13#10'Not all Click or Drag actions need this.'
+    Top = 120
+    Width = 209
+    Caption = 'Include FindSubControl before Click'
+    Checked = True
+    ParentShowHint = False
+    ShowHint = True
+    State = cbChecked
+    TabOrder = 12
   end
   object tmrRec: TTimer
     Enabled = False
