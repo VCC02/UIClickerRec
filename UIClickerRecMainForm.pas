@@ -75,6 +75,7 @@ type
     shpRec: TShape;
     spnedtUnconditionalPeriod: TSpinEdit;
     spnedtMouseMovePeriod: TSpinEdit;
+    tmrStartup: TTimer;
     tmrMouseMoveDebounce: TTimer;
     tmrBlinkRec: TTimer;
     tmrRec: TTimer;
@@ -82,10 +83,12 @@ type
     procedure btnClearRecordingClick(Sender: TObject);
     procedure btnCopySelectedActionsToClipboardClick(Sender: TObject);
     procedure chkRecChange(Sender: TObject);
+    procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
     procedure FormCreate(Sender: TObject);
     procedure tmrBlinkRecTimer(Sender: TObject);
     procedure tmrMouseMoveDebounceTimer(Sender: TObject);
     procedure tmrRecTimer(Sender: TObject);
+    procedure tmrStartupTimer(Sender: TObject);
     procedure vstRecGetImageIndex(Sender: TBaseVirtualTree; Node: PVirtualNode;
       Kind: TVTImageKind; Column: TColumnIndex; var Ghosted: boolean;
       var ImageIndex: integer);
@@ -134,6 +137,9 @@ type
     procedure CopySelectedActionsToClipboard;
     procedure AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime);
 
+    procedure LoadSettingsFromIni;
+    procedure SaveSettingsToIni;
+
     procedure HandleOnLeftButtonDown;
     procedure HandleOnRightButtonDown;
     procedure HandleOnMiddleButtonDown;
@@ -153,7 +159,7 @@ implementation
 
 
 uses
-  BitmapProcessing, ClickerActionProperties, ClickerTemplates,
+  BitmapProcessing, ClickerActionProperties, ClickerTemplates, ClickerIniFiles,
   Clipbrd;
 
 { TfrmUIClickerRecMain }
@@ -162,6 +168,40 @@ uses
 procedure TfrmUIClickerRecMain.AddToLog(s: string);
 begin
   memLog.Lines.Add(DateTimeToStr(Now) + '  ' + s);
+end;
+
+
+procedure TfrmUIClickerRecMain.LoadSettingsFromIni;
+var
+  Ini: TClkIniReadonlyFile;
+begin
+  Ini := TClkIniReadonlyFile.Create(ExtractFilePath(ParamStr(0)) + 'UIClickerRec.ini');
+  try
+    Left := Ini.ReadInteger('Window', 'Left', Left);
+    Top := Ini.ReadInteger('Window', 'Top', Top);
+    Width := Ini.ReadInteger('Window', 'Width', Width);
+    Height := Ini.ReadInteger('Window', 'Height', Height);
+  finally
+    Ini.Free;
+  end;
+end;
+
+
+procedure TfrmUIClickerRecMain.SaveSettingsToIni;
+var
+  Ini: TClkIniFile;
+begin
+  Ini := TClkIniFile.Create(ExtractFilePath(ParamStr(0)) + 'UIClickerRec.ini');
+  try
+    Ini.WriteInteger('Window', 'Left', Left);
+    Ini.WriteInteger('Window', 'Top', Top);
+    Ini.WriteInteger('Window', 'Width', Width);
+    Ini.WriteInteger('Window', 'Height', Height);
+
+    Ini.UpdateFile;
+  finally
+    Ini.Free;
+  end;
 end;
 
 
@@ -187,6 +227,16 @@ begin
   chkMouseMoveScreenshots1.Enabled := tmrRec.Enabled;
   spnedtUnconditionalPeriod.Enabled := tmrRec.Enabled;
   spnedtMouseMovePeriod.Enabled := tmrRec.Enabled;
+end;
+
+
+procedure TfrmUIClickerRecMain.FormClose(Sender: TObject;
+  var CloseAction: TCloseAction);
+begin
+  try
+    SaveSettingsToIni;
+  except
+  end;
 end;
 
 
@@ -287,6 +337,8 @@ begin
   SetLength(FAllRecs, 1);  //this should be 0, to start with an empty list of recordings
   SetLength(FAllRecs[0].Actions, 0);
   SetLength(FAllRecs[0].Details, 0);
+
+  tmrStartup.Enabled := True;
 end;
 
 
@@ -362,6 +414,13 @@ begin
 end;
 
 
+procedure TfrmUIClickerRecMain.tmrStartupTimer(Sender: TObject);
+begin
+  tmrStartup.Enabled := False;
+  LoadSettingsFromIni;
+end;
+
+
 procedure TfrmUIClickerRecMain.vstRecGetImageIndex(Sender: TBaseVirtualTree;
   Node: PVirtualNode; Kind: TVTImageKind; Column: TColumnIndex;
   var Ghosted: boolean; var ImageIndex: integer);
@@ -403,6 +462,9 @@ begin
 
         acFindControl:
           CellText := FAllRecs[0].Actions[Node^.Index].FindControlOptions.MatchText;
+
+        acFindSubControl:
+          CellText := FAllRecs[0].Actions[Node^.Index].FindSubControlOptions.MatchText;
 
         else
           CellText := 'Unimplemented';
@@ -570,7 +632,8 @@ begin
     GetWindowThreadProcessId(CompB.Handle, @ProcIDB);
 
     Found := False;
-    if (ProcIDL = TargetProcID) and (CompL.Handle > 0) then
+    if (ProcIDL = TargetProcID) and (CompL.Handle > 0) and
+       ((Length(ATree) = 1) or (Length(ATree) > 1) and (ATree[Length(ATree) - 1].Handle <> CompL.Handle)) then
     begin
       SetLength(ATree, Length(ATree) + 1);
       ATree[Length(ATree) - 1] := CompL;
@@ -582,7 +645,8 @@ begin
           Break;
     end;
 
-    if (ProcIDT = TargetProcID) and (CompT.Handle > 0) and not Found then
+    if (ProcIDT = TargetProcID) and (CompT.Handle > 0) and not Found and
+       ((Length(ATree) = 1) or (Length(ATree) > 1) and (ATree[Length(ATree) - 1].Handle <> CompT.Handle)) then
     begin
       SetLength(ATree, Length(ATree) + 1);
       ATree[Length(ATree) - 1] := CompT;
@@ -594,7 +658,8 @@ begin
           Break;
     end;
 
-    if (ProcIDR = TargetProcID) and (CompR.Handle > 0) and not Found then
+    if (ProcIDR = TargetProcID) and (CompR.Handle > 0) and not Found and
+       ((Length(ATree) = 1) or (Length(ATree) > 1) and (ATree[Length(ATree) - 1].Handle <> CompR.Handle)) then
     begin
       SetLength(ATree, Length(ATree) + 1);
       ATree[Length(ATree) - 1] := CompR;
@@ -606,7 +671,8 @@ begin
           Break;
     end;
 
-    if (ProcIDB = TargetProcID) and (CompB.Handle > 0) and not Found then
+    if (ProcIDB = TargetProcID) and (CompB.Handle > 0) and not Found and
+       ((Length(ATree) = 1) or (Length(ATree) > 1) and (ATree[Length(ATree) - 1].Handle <> CompB.Handle)) then
     begin
       SetLength(ATree, Length(ATree) + 1);
       ATree[Length(ATree) - 1] := CompB;
@@ -656,6 +722,9 @@ begin
 
   if chkIncludeFindSubControl.Checked then
   begin
+    if (ATree[i].ClassName = '#32768') or (ATree[i].ClassName = '#32770') or (ATree[i].ClassName = 'Button') then
+      ATree[i].Text := StringReplace(ATree[i].Text, '&', '', [rfReplaceAll]);
+
     SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
     SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
     FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := ACurrentNow;
@@ -671,7 +740,29 @@ begin
     FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionTimeout := 1000;
 
     GetDefaultPropertyValues_FindSubControl(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions);
+    SetLength(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText, 3);
     FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := ATree[i].Text;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].ForegroundColor := '$Color_WindowText$';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].BackgroundColor := '$Color_BtnFace$';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].FontName := 'Tahoma';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].FontSize := 8;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].FontQuality := fqNonAntialiased;
+
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := ATree[i].Text;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].ForegroundColor := '$Color_WindowText$';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].BackgroundColor := '$Color_BtnFace$';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].FontName := 'Segoe UI';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].FontSize := 9;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].FontQuality := fqAntialiased;
+
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := ATree[i].Text;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].ForegroundColor := '$Color_WindowText$';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].BackgroundColor := '$Color_BtnFace$';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].FontName := 'Segoe UI';
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].FontSize := 9;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].FontQuality := fqCleartype;
+    //This will require more complex settings, with more profiles
+    //The colors will have to be obtained from the screnshot and tested by UIClicker
   end;
 
   //Click

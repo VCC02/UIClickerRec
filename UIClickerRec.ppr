@@ -35,7 +35,7 @@ uses
   {$ENDIF}
   Interfaces, // this includes the CT adLCL widgetset
   Forms, UIClickerRecMainForm, BitmapProcessing, CLHeaders, ClickerUtils,
-  ClickerActionProperties, ClickerTemplates;
+  ClickerActionProperties, ClickerTemplates, ClickerIniFiles;
 
 {$R *.res}
 

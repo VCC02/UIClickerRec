@@ -10,6 +10,7 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
   Constraints.MinHeight = 376
   Constraints.MinWidth = 502
   LCLVersion = '8.4'
+  OnClose = FormClose
   OnCreate = FormCreate
   object chkRec: TCheckBox
     Left = 8
@@ -428,5 +429,12 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
       A7FBAF38F57385B5A74AB40D6DCBEFFF3EE9B3FB717FBDB49EDA1E47B40D6DCB
       B1FF060F5259EF
     }
+  end
+  object tmrStartup: TTimer
+    Enabled = False
+    Interval = 10
+    OnTimer = tmrStartupTimer
+    Left = 264
+    Top = 296
   end
 end
