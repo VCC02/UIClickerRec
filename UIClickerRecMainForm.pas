@@ -121,7 +121,9 @@ type
     FPrevMiddleButtonUp: Boolean;
 
     FMouseMoving: Boolean;
-    FMouseDragging: Boolean;
+    FMouseLeftDragging: Boolean;
+    FMouseRightDragging: Boolean;
+    FMouseMiddleDragging: Boolean;
 
     FLastPos: TPoint;   //any event
     FLastPosLeft: TPoint;  //Left button
@@ -325,7 +327,9 @@ begin
   FPrevMiddleButtonUp := True;
 
   FMouseMoving := False;
-  FMouseDragging := False;
+  FMouseLeftDragging := False;
+  FMouseRightDragging := False;
+  FMouseMiddleDragging := False;
 
   FLastPosLeft.X := -1;
   FLastPosLeft.Y := -1;
@@ -380,7 +384,26 @@ begin
     if FMouseMoving then
       tmrMouseMoveDebounce.Enabled := True;
 
-  FMouseDragging := (FLeftButtonDown or FRightButtonDown or FMiddleButtonDown) and FMouseMoving;
+  if FMouseMoving then
+  begin
+    if FLeftButtonDown then
+      FMouseLeftDragging := True;
+
+    if FRightButtonDown then
+      FMouseRightDragging := True;
+
+    if FMiddleButtonDown then
+      FMouseMiddleDragging := True;
+  end;
+
+  if FLeftButtonUp then
+    FMouseLeftDragging := False;
+
+  if FRightButtonUp then
+    FMouseRightDragging := False;
+
+  if FMiddleButtonUp then
+    FMouseMiddleDragging := False;
 
   //Transitions detection
   if not FPrevLeftButtonDown and FLeftButtonDown then
@@ -540,7 +563,7 @@ begin
   else
     pnlMouseMove.Color := clOlive;
 
-  if FMouseDragging then
+  if FMouseLeftDragging or FMouseRightDragging or FMouseMiddleDragging then
     pnlMouseDrag.Color := clYellow
   else
     pnlMouseDrag.Color := clOlive;
