@@ -249,6 +249,7 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
     OnGetImageIndex = vstRecGetImageIndex
     OnGetImageIndexEx = vstRecGetImageIndexEx
     OnKeyDown = vstRecKeyDown
+    OnKeyUp = vstRecKeyUp
     OnMouseDown = vstRecMouseDown
     OnMouseUp = vstRecMouseUp
   end

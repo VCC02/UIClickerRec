@@ -99,6 +99,7 @@ type
     procedure vstRecGetText(Sender: TBaseVirtualTree; Node: PVirtualNode;
       Column: TColumnIndex; TextType: TVSTTextType; var CellText: string);
     procedure vstRecKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure vstRecKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure vstRecMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure vstRecMouseUp(Sender: TObject; Button: TMouseButton;
@@ -138,6 +139,8 @@ type
     function GetSelectedActions(var AActionsArr: TClkActionsRecArr): Integer;
     procedure CopySelectedActionsToClipboard;
     procedure AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime);
+    procedure RemoveAction(ActionIndex: Integer; AClearSelectionAfterRemoving: Boolean = True; AUpdateRootNodeCount: Boolean = True);
+    procedure RemoveSelectedActions;
 
     procedure LoadSettingsFromIni;
     procedure SaveSettingsToIni;
@@ -163,6 +166,13 @@ implementation
 uses
   BitmapProcessing, ClickerActionProperties, ClickerTemplates, ClickerIniFiles,
   Clipbrd;
+
+
+const
+  {$IFDEF FPC}
+    ID_YES = IDYES;  //from Delphi
+  {$ENDIF}
+
 
 { TfrmUIClickerRecMain }
 
@@ -384,7 +394,7 @@ begin
     if FMouseMoving then
       tmrMouseMoveDebounce.Enabled := True;
 
-  if FMouseMoving then
+  if FMouseMoving and ((Abs(FLastPos.X - tp.X) > 5) or (Abs(FLastPos.Y - tp.Y) > 5)) then
   begin
     if FLeftButtonDown then
       FMouseLeftDragging := True;
@@ -395,15 +405,6 @@ begin
     if FMiddleButtonDown then
       FMouseMiddleDragging := True;
   end;
-
-  if FLeftButtonUp then
-    FMouseLeftDragging := False;
-
-  if FRightButtonUp then
-    FMouseRightDragging := False;
-
-  if FMiddleButtonUp then
-    FMouseMiddleDragging := False;
 
   //Transitions detection
   if not FPrevLeftButtonDown and FLeftButtonDown then
@@ -416,7 +417,7 @@ begin
     HandleOnMiddleButtonDown;
 
   if not FPrevLeftButtonUp and FLeftButtonUp then
-    HandleOnLeftButtonUp;
+    HandleOnLeftButtonUp;  //should also handle "if not FMouseLeftDragging then" here?
 
   if not FPrevRightButtonUp and FRightButtonUp then
     HandleOnRightButtonUp;
@@ -431,6 +432,16 @@ begin
   FPrevLeftButtonUp := FLeftButtonUp;
   FPrevRightButtonUp := FRightButtonUp;
   FPrevMiddleButtonUp := FMiddleButtonUp;
+
+  //Reset the "Dragging" flags after calling the handlers!
+  if FLeftButtonUp then
+    FMouseLeftDragging := False;
+
+  if FRightButtonUp then
+    FMouseRightDragging := False;
+
+  if FMiddleButtonUp then
+    FMouseMiddleDragging := False;
 
   FLastPos := tp;
   DisplayMouseButtonStates;
@@ -515,6 +526,14 @@ begin
 end;
 
 
+procedure TfrmUIClickerRecMain.vstRecKeyUp(Sender: TObject; var Key: Word;
+  Shift: TShiftState);
+begin
+  if Key = VK_DELETE then
+    RemoveSelectedActions;
+end;
+
+
 procedure TfrmUIClickerRecMain.vstRecMouseDown(Sender: TObject;
   Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
@@ -567,6 +586,97 @@ begin
     pnlMouseDrag.Color := clYellow
   else
     pnlMouseDrag.Color := clOlive;
+end;
+
+
+procedure RemoveActionDetailsFromArr(var AActionDetails: TExtraActionDetailsArr; ActionIndex: Integer);
+var
+  i: Integer;
+begin
+  if Length(AActionDetails) = 0 then
+    Exit;
+
+  if (ActionIndex < 0) or (ActionIndex > Length(AActionDetails) - 1) then
+    raise Exception.Create('Attempting to remove an action detail by an out of bounds index.');
+
+  for i := ActionIndex to Length(AActionDetails) - 2 do
+    AActionDetails[i] := AActionDetails[i + 1];
+
+  SetLength(AActionDetails, Length(AActionDetails) - 1);
+end;
+
+
+procedure TfrmUIClickerRecMain.RemoveAction(ActionIndex: Integer; AClearSelectionAfterRemoving: Boolean = True; AUpdateRootNodeCount: Boolean = True);
+begin
+  if Length(FAllRecs[0].Actions) = 0 then
+    Exit;
+
+  if AClearSelectionAfterRemoving then
+    vstRec.Clear; // vstActions.RootNodeCount := 0; //to reinit nodes
+
+  if AUpdateRootNodeCount then
+    vstRec.RootNodeCount := Length(FAllRecs[0].Actions) - 1;
+
+  RemoveActionFromArr(FAllRecs[0].Actions, ActionIndex); //deleting the action after setting VST node count, to avoid AVs
+  RemoveActionDetailsFromArr(FAllRecs[0].Details, ActionIndex);
+
+  //UpdateNodesCheckStateFromActions;  //uncomment this if implementing checkboxes
+end;
+
+
+procedure TfrmUIClickerRecMain.RemoveSelectedActions;
+var
+  Node: PVirtualNode;
+  IdxArr: TIntArr;
+  i: Integer;
+begin
+  Node := vstRec.GetFirstSelected;
+
+  if Node = nil then
+  begin
+    MessageBox(Handle, 'No action selected for removing. Please select at least one.', PChar(Caption), MB_ICONINFORMATION);
+    Exit;
+  end;
+
+  Node := vstRec.GetLast;
+  if MessageBox(Handle, 'Are you sure you want to remove the selected action(s) from list?', PChar(Caption), MB_ICONQUESTION + MB_YESNO) = ID_YES then
+  begin
+    vstRec.BeginUpdate;
+    try
+      SetLength(IdxArr, 0);
+      repeat
+        if vstRec.Selected[Node] then
+        begin
+          SetLength(IdxArr, Length(IdxArr) + 1);
+          IdxArr[Length(IdxArr) - 1] := Node^.Index;
+        end;
+
+        Node := Node^.PrevSibling;
+      until Node = nil;
+    finally
+      vstRec.EndUpdate;
+    end;
+
+    if Length(IdxArr) > 0 then
+    begin
+      vstRec.ClearSelection;  //the selected actions will be deleted, so make sure they are not selected anymore
+
+      vstRec.BeginUpdate;
+      try
+        for i := 0 to Length(IdxArr) - 1 do
+          RemoveAction(IdxArr[i], False, True);
+
+        if Length(FAllRecs[0].Actions) > 0 then
+          vstRec.RootNodeCount := Length(FAllRecs[0].Actions);  //this should not be required if RemoveAction updates RootNodeCount
+      finally
+        SetLength(IdxArr, 0);
+        vstRec.EndUpdate;
+      end;
+
+      vstRec.Repaint;
+      vstRec.ClearSelection;
+    end;
+  end; //confirmation
 end;
 
 
@@ -815,6 +925,33 @@ begin
 end;
 
 
+function IsMenu(AComp: TCompRec): Boolean;
+begin
+  Result := True;
+  if (AComp.ClassName = '#32768') and (AComp.Text = '') then //system menu  - unfortunately, there are other windows with this handle
+    Exit; //other menus (classes and other info) should be added, in order to identify components which are destroyed on MouseDown
+
+  Result := False;
+end;
+
+
+function IsSelfClosingComponent(AComp: TCompRec): Boolean;
+begin
+  Result := True;
+
+  if IsMenu(AComp) then
+    Exit;
+
+  if (AComp.ClassName = 'Button') and ((AComp.Text = '&Yes') or (AComp.Text = '&No') or (AComp.Text = 'OK')) then //MessageBox buttons
+    Exit;              //ParentClass = '#32770
+
+  if (AComp.ClassName = 'Button') and ((AComp.Text = '&Open') or (AComp.Text = '&Save') or (AComp.Text = 'Select Folder') or (AComp.Text = 'Cancel')) then //Open/Save dialog buttons
+    Exit;              //ParentClass = '#32770
+
+  Result := False;
+end;
+
+
 procedure TfrmUIClickerRecMain.HandleOnLeftButtonDown;
 var
   CompUp: TCompRec;
@@ -827,6 +964,9 @@ begin
   //Special handling of MouseDown, as MouseClick, on menus, which react on MouseDown, so there would be no MouseUp to define a click:
   CompUp := GetWindowClassRec(FLastPosLeft);
 
+  if not IsSelfClosingComponent(CompUp) then
+    Exit;
+
   if not chkIncludeThisRecorder.Checked and
     ((CompUp.Handle = Handle) or
      (CompUp.Handle = chkIncludeThisRecorder.Handle) or
@@ -838,7 +978,7 @@ begin
 
   CurrentNow := Now;
   GetControlParentTree(CompUp, Tree);
-  AddFindControlAndClickActions(Tree, 'Click', mbLeft, CurrentNow);
+  AddFindControlAndClickActions(Tree, 'Click (MouseDown)', mbLeft, CurrentNow);
 end;
 
 
@@ -853,33 +993,6 @@ procedure TfrmUIClickerRecMain.HandleOnMiddleButtonDown;
 begin
   FLastPosMiddle := FLastPos;
   AddToLog('Middle down on ' + GetComponentInfoAsStringAtPoint(FLastPos));
-end;
-
-
-function IsMenu(AComp: TCompRec): Boolean;
-begin
-  Result := True;
-  if not ((AComp.ClassName = '#32768') and (AComp.Text = '')) then //system menu  - unfortunately, there are other windows with this handle
-    Exit; //other menus (classes and other info) should be added, in order to identify components which are destroyed on MouseDown
-
-  Result := False;
-end;
-
-
-function IsSelfClosingComponent(AComp: TCompRec): Boolean;
-begin
-  Result := True;
-
-  if IsMenu(AComp) then
-    Exit;
-
-  if not ((AComp.ClassName = 'Button') and ((AComp.Text = '&Yes') or (AComp.Text = '&No') or (AComp.Text = 'OK'))) then //MessageBox buttons
-    Exit;              //ParentClass = '#32770
-
-  if not ((AComp.ClassName = 'Button') and ((AComp.Text = '&Open') or (AComp.Text = '&Save') or (AComp.Text = 'Select Folder') or (AComp.Text = 'Cancel'))) then //Open/Save dialog buttons
-    Exit;              //ParentClass = '#32770
-
-  Result := False;
 end;
 
 
@@ -898,7 +1011,7 @@ begin
   if IsSelfClosingComponent(CompDown) then
     Exit;
 
-  if (CompUp.Handle = CompDown.Handle) and (Abs(FLastPos.X - FLastPosLeft.X) < 6) and (Abs(FLastPos.Y - FLastPosLeft.Y) < 6) then
+  if CompUp.Handle = CompDown.Handle then
   begin
     if not chkIncludeThisRecorder.Checked and
       ((CompUp.Handle = Handle) or
@@ -911,8 +1024,12 @@ begin
 
     CurrentNow := Now;
     GetControlParentTree(CompUp, Tree);
-    AddFindControlAndClickActions(Tree, 'Click', mbLeft, CurrentNow);
-  end;
+
+    if (Abs(FLastPos.X - FLastPosLeft.X) < 6) and (Abs(FLastPos.Y - FLastPosLeft.Y) < 6) then
+      AddFindControlAndClickActions(Tree, 'Click (MouseUp)', mbLeft, CurrentNow)
+    else
+      AddFindControlAndClickActions(Tree, 'Drag', mbLeft, CurrentNow);
+  end; //CompUp.Handle =
 end;
 
 
@@ -930,7 +1047,7 @@ begin
 
   //if IsMenu then  Exit;
 
-  if (CompUp.ClassName = '#32768') and (CompUp.ComponentRectangle.Left = FLastPos.X) and (CompUp.ComponentRectangle.Top = FLastPos.Y) then //system menu
+  if IsMenu(CompUp) and (CompUp.ComponentRectangle.Left = FLastPos.X) and (CompUp.ComponentRectangle.Top = FLastPos.Y) then //system menu
   begin                 //Handled only the case where the pop-up menu opens to the right-bottom of the mouse cursor.
     Dec(FLastPos.X);
     Dec(FLastPos.Y);
