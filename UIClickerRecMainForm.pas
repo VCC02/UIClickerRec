@@ -50,6 +50,12 @@ type
 
   TRecordingArr = array of TRecording;
 
+  TMouseButtonState = record
+    Point: TPoint;
+    IsDown: Boolean;
+    CompEvent: TCompRec;
+  end;
+
   { TfrmUIClickerRecMain }
 
   TfrmUIClickerRecMain = class(TForm)
@@ -105,21 +111,21 @@ type
     procedure vstRecMouseUp(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
   private
-    FLeftButtonDown: Boolean;
-    FRightButtonDown: Boolean;
-    FMiddleButtonDown: Boolean;
+    FLeftButtonDown: TMouseButtonState;
+    FRightButtonDown: TMouseButtonState;
+    FMiddleButtonDown: TMouseButtonState;
 
-    FLeftButtonUp: Boolean;
-    FRightButtonUp: Boolean;
-    FMiddleButtonUp: Boolean;
+    FLeftButtonUp: TMouseButtonState;
+    FRightButtonUp: TMouseButtonState;
+    FMiddleButtonUp: TMouseButtonState;
 
-    FPrevLeftButtonDown: Boolean;
-    FPrevRightButtonDown: Boolean;
-    FPrevMiddleButtonDown: Boolean;
+    FPrevLeftButtonDown: TMouseButtonState;
+    FPrevRightButtonDown: TMouseButtonState;
+    FPrevMiddleButtonDown: TMouseButtonState;
 
-    FPrevLeftButtonUp: Boolean;
-    FPrevRightButtonUp: Boolean;
-    FPrevMiddleButtonUp: Boolean;
+    FPrevLeftButtonUp: TMouseButtonState;
+    FPrevRightButtonUp: TMouseButtonState;
+    FPrevMiddleButtonUp: TMouseButtonState;
 
     FMouseMoving: Boolean;
     FMouseLeftDragging: Boolean;
@@ -138,9 +144,10 @@ type
     procedure DisplayMouseButtonStates;
     function GetSelectedActions(var AActionsArr: TClkActionsRecArr): Integer;
     procedure CopySelectedActionsToClipboard;
-    procedure AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime);
+    procedure AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime; ACompDown: TCompRec);
     procedure RemoveAction(ActionIndex: Integer; AClearSelectionAfterRemoving: Boolean = True; AUpdateRootNodeCount: Boolean = True);
     procedure RemoveSelectedActions;
+    function IsRecComponent(AComp: TCompRec): Boolean;
 
     procedure LoadSettingsFromIni;
     procedure SaveSettingsToIni;
@@ -172,6 +179,9 @@ const
   {$IFDEF FPC}
     ID_YES = IDYES;  //from Delphi
   {$ENDIF}
+
+  CSelectActionName = 'Select';
+  CDragActionName = 'Drag';
 
 
 { TfrmUIClickerRecMain }
@@ -226,9 +236,26 @@ begin
   begin
     shpRec.Brush.Color := $000040;
 
-    FLeftButtonDown := False;
-    FRightButtonDown := False;
-    FMiddleButtonDown := False;
+    FLeftButtonDown.IsDown := False;
+    FRightButtonDown.IsDown := False;
+    FMiddleButtonDown.IsDown := False;
+    FLeftButtonUp.IsDown := True;
+    FRightButtonUp.IsDown := True;
+    FMiddleButtonUp.IsDown := True;
+
+    FPrevLeftButtonDown.IsDown := False;
+    FPrevRightButtonDown.IsDown := False;
+    FPrevMiddleButtonDown.IsDown := False;
+    FPrevLeftButtonUp.IsDown := True;
+    FPrevRightButtonUp.IsDown := True;
+    FPrevMiddleButtonUp.IsDown := True;
+
+    FLeftButtonDown.Point.X := -1;
+    FLeftButtonDown.Point.Y := -1;
+    FRightButtonDown.Point.X := -1;
+    FRightButtonDown.Point.Y := -1;
+    FMiddleButtonDown.Point.X := -1;
+    FMiddleButtonDown.Point.Y := -1;
 
     DisplayMouseButtonStates;
   end;
@@ -320,21 +347,21 @@ end;
 
 procedure TfrmUIClickerRecMain.FormCreate(Sender: TObject);
 begin
-  FLeftButtonDown := False;
-  FRightButtonDown := False;
-  FMiddleButtonDown := False;
+  FLeftButtonDown.IsDown := False;
+  FRightButtonDown.IsDown := False;
+  FMiddleButtonDown.IsDown := False;
 
-  FPrevLeftButtonDown := False;
-  FPrevRightButtonDown := False;
-  FPrevMiddleButtonDown := False;
+  FPrevLeftButtonDown.IsDown := False;
+  FPrevRightButtonDown.IsDown := False;
+  FPrevMiddleButtonDown.IsDown := False;
 
-  FLeftButtonUp := False;
-  FRightButtonUp := False;
-  FMiddleButtonUp := False;
+  FLeftButtonUp.IsDown := False;
+  FRightButtonUp.IsDown := False;
+  FMiddleButtonUp.IsDown := False;
 
-  FPrevLeftButtonUp := True;
-  FPrevRightButtonUp := True;
-  FPrevMiddleButtonUp := True;
+  FPrevLeftButtonUp.IsDown := True;
+  FPrevRightButtonUp.IsDown := True;
+  FPrevMiddleButtonUp.IsDown := True;
 
   FMouseMoving := False;
   FMouseLeftDragging := False;
@@ -378,13 +405,13 @@ procedure TfrmUIClickerRecMain.tmrRecTimer(Sender: TObject);
 var
   tp: TPoint;
 begin
-  FLeftButtonDown := GetAsyncKeyState(VK_LBUTTON) < 0;
-  FRightButtonDown := GetAsyncKeyState(VK_RBUTTON) < 0;
-  FMiddleButtonDown := GetAsyncKeyState(VK_MBUTTON) < 0;
+  FLeftButtonDown.IsDown := GetAsyncKeyState(VK_LBUTTON) < 0;
+  FRightButtonDown.IsDown := GetAsyncKeyState(VK_RBUTTON) < 0;
+  FMiddleButtonDown.IsDown := GetAsyncKeyState(VK_MBUTTON) < 0;
 
-  FLeftButtonUp := not FLeftButtonDown;
-  FRightButtonUp := not FRightButtonDown;
-  FMiddleButtonUp := not FMiddleButtonDown;
+  FLeftButtonUp.IsDown := not FLeftButtonDown.IsDown;
+  FRightButtonUp.IsDown := not FRightButtonDown.IsDown;
+  FMiddleButtonUp.IsDown := not FMiddleButtonDown.IsDown;
 
   GetCursorPos(tp);
 
@@ -396,34 +423,58 @@ begin
 
   if FMouseMoving and ((Abs(FLastPos.X - tp.X) > 5) or (Abs(FLastPos.Y - tp.Y) > 5)) then
   begin
-    if FLeftButtonDown then
+    if FLeftButtonDown.IsDown then
       FMouseLeftDragging := True;
 
-    if FRightButtonDown then
+    if FRightButtonDown.IsDown then
       FMouseRightDragging := True;
 
-    if FMiddleButtonDown then
+    if FMiddleButtonDown.IsDown then
       FMouseMiddleDragging := True;
   end;
 
   //Transitions detection
-  if not FPrevLeftButtonDown and FLeftButtonDown then
+  if not FPrevLeftButtonDown.IsDown and FLeftButtonDown.IsDown then
+  begin
+    FLeftButtonDown.Point := tp;
+    FLeftButtonDown.CompEvent := GetWindowClassRec(tp);
     HandleOnLeftButtonDown;
+  end;
 
-  if not FPrevRightButtonDown and FRightButtonDown then
+  if not FPrevRightButtonDown.IsDown and FRightButtonDown.IsDown then
+  begin
+    FRightButtonDown.Point := tp;
+    FRightButtonDown.CompEvent := GetWindowClassRec(tp);
     HandleOnRightButtonDown;
+  end;
 
-  if not FPrevMiddleButtonDown and FMiddleButtonDown then
+  if not FPrevMiddleButtonDown.IsDown and FMiddleButtonDown.IsDown then
+  begin
+    FMiddleButtonDown.Point := tp;
+    FMiddleButtonDown.CompEvent := GetWindowClassRec(tp);
     HandleOnMiddleButtonDown;
+  end;
 
-  if not FPrevLeftButtonUp and FLeftButtonUp then
+  if not FPrevLeftButtonUp.IsDown and FLeftButtonUp.IsDown then
+  begin
+    FLeftButtonUp.Point := tp;
+    FLeftButtonUp.CompEvent := GetWindowClassRec(tp);
     HandleOnLeftButtonUp;  //should also handle "if not FMouseLeftDragging then" here?
+  end;
 
-  if not FPrevRightButtonUp and FRightButtonUp then
+  if not FPrevRightButtonUp.IsDown and FRightButtonUp.IsDown then
+  begin
+    FRightButtonUp.Point := tp;
+    FRightButtonUp.CompEvent := GetWindowClassRec(tp);
     HandleOnRightButtonUp;
+  end;
 
-  if not FPrevMiddleButtonUp and FMiddleButtonUp then
+  if not FPrevMiddleButtonUp.IsDown and FMiddleButtonUp.IsDown then
+  begin
+    FMiddleButtonUp.Point := tp;
+    FMiddleButtonUp.CompEvent := GetWindowClassRec(tp);
     HandleOnMiddleButtonUp;
+  end;
 
   FPrevLeftButtonDown := FLeftButtonDown;
   FPrevRightButtonDown := FRightButtonDown;
@@ -434,13 +485,13 @@ begin
   FPrevMiddleButtonUp := FMiddleButtonUp;
 
   //Reset the "Dragging" flags after calling the handlers!
-  if FLeftButtonUp then
+  if FLeftButtonUp.IsDown then
     FMouseLeftDragging := False;
 
-  if FRightButtonUp then
+  if FRightButtonUp.IsDown then
     FMouseRightDragging := False;
 
-  if FMiddleButtonUp then
+  if FMiddleButtonUp.IsDown then
     FMouseMiddleDragging := False;
 
   FLastPos := tp;
@@ -562,17 +613,17 @@ end;
 
 procedure TfrmUIClickerRecMain.DisplayMouseButtonStates;
 begin
-  if FLeftButtonDown then
+  if FLeftButtonDown.IsDown then
     pnlLeft.Color := clYellow
   else
     pnlLeft.Color := clOlive;
 
-  if FMiddleButtonDown then
+  if FMiddleButtonDown.IsDown then
     pnlMiddle.Color := clYellow
   else
     pnlMiddle.Color := clOlive;
 
-  if FRightButtonDown then
+  if FRightButtonDown.IsDown then
     pnlRight.Color := clYellow
   else
     pnlRight.Color := clOlive;
@@ -823,7 +874,7 @@ begin
 end;
 
 
-procedure TfrmUIClickerRecMain.AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime);
+procedure TfrmUIClickerRecMain.AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime; ACompDown: TCompRec);
 var
   i: Integer;
   LocalGroupID: string;
@@ -918,6 +969,21 @@ begin
   GetDefaultPropertyValues_Click(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions);
   FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.MouseButton := AMouseButton;
 
+  if AClickActionName = CDragActionName then
+  begin
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.ClickType := CClickType_Drag;
+    //ToDo:
+    //ACompDown is the source of dragging, while ATree[0] is the destination.
+  end;
+
+  if AClickActionName = CSelectActionName then
+  begin
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.ClickType := CClickType_Drag;
+    //ToDo:
+    //ACompDown is the source of dragging, while ATree[0] is the destination.
+  end;
+
+
   vstRec.RootNodeCount := Length(FAllRecs[0].Actions);
   vstRec.ClearSelection;
   vstRec.Selected[vstRec.GetLast] := True;
@@ -952,6 +1018,17 @@ begin
 end;
 
 
+function TfrmUIClickerRecMain.IsRecComponent(AComp: TCompRec): Boolean;
+begin
+  Result := ((AComp.Handle = Handle) or
+             (AComp.Handle = chkIncludeThisRecorder.Handle) or
+             (AComp.Handle = btnCopySelectedActionsToClipboard.Handle) or
+             (AComp.Handle = btnClearRecording.Handle) or
+             (AComp.Handle = chkRec.Handle) or
+             (AComp.Handle = vstRec.Handle));
+end;
+
+
 procedure TfrmUIClickerRecMain.HandleOnLeftButtonDown;
 var
   CompUp: TCompRec;
@@ -962,23 +1039,19 @@ begin
   AddToLog('Left down on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
   //Special handling of MouseDown, as MouseClick, on menus, which react on MouseDown, so there would be no MouseUp to define a click:
-  CompUp := GetWindowClassRec(FLastPosLeft);
+  //CompUp := GetWindowClassRec(FLastPosLeft);
+  CompUp := FLeftButtonDown.CompEvent;
 
   if not IsSelfClosingComponent(CompUp) then
     Exit;
 
   if not chkIncludeThisRecorder.Checked and
-    ((CompUp.Handle = Handle) or
-     (CompUp.Handle = chkIncludeThisRecorder.Handle) or
-     (CompUp.Handle = btnCopySelectedActionsToClipboard.Handle) or
-     (CompUp.Handle = btnClearRecording.Handle) or
-     (CompUp.Handle = chkRec.Handle) or
-     (CompUp.Handle = vstRec.Handle)) then
+    IsRecComponent(CompUp) then
     Exit;
 
   CurrentNow := Now;
   GetControlParentTree(CompUp, Tree);
-  AddFindControlAndClickActions(Tree, 'Click (MouseDown)', mbLeft, CurrentNow);
+  AddFindControlAndClickActions(Tree, 'Click (MouseDown)', mbLeft, CurrentNow, CompUp);
 end;
 
 
@@ -1005,31 +1078,40 @@ var
 begin
   AddToLog('Left up on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
-  CompDown := GetWindowClassRec(FLastPosLeft);
-  CompUp := GetWindowClassRec(FLastPos);
+  CompDown := FLeftButtonDown.CompEvent;
+  CompUp := FLeftButtonUp.CompEvent;
 
   if IsSelfClosingComponent(CompDown) then
     Exit;
 
+  if not chkIncludeThisRecorder.Checked and
+    IsRecComponent(CompUp) then
+    Exit;
+
+  CurrentNow := Now;
+  GetControlParentTree(CompUp, Tree);
+
   if CompUp.Handle = CompDown.Handle then
   begin
-    if not chkIncludeThisRecorder.Checked and
-      ((CompUp.Handle = Handle) or
-       (CompUp.Handle = chkIncludeThisRecorder.Handle) or
-       (CompUp.Handle = btnCopySelectedActionsToClipboard.Handle) or
-       (CompUp.Handle = btnClearRecording.Handle) or
-       (CompUp.Handle = chkRec.Handle) or
-       (CompUp.Handle = vstRec.Handle)) then
-      Exit;
-
-    CurrentNow := Now;
-    GetControlParentTree(CompUp, Tree);
-
-    if (Abs(FLastPos.X - FLastPosLeft.X) < 6) and (Abs(FLastPos.Y - FLastPosLeft.Y) < 6) then
-      AddFindControlAndClickActions(Tree, 'Click (MouseUp)', mbLeft, CurrentNow)
+    if (Abs(FLeftButtonUp.Point.X - FLeftButtonDown.Point.X) < 6) and (Abs(FLeftButtonUp.Point.Y - FLeftButtonDown.Point.Y) < 6) then
+      AddFindControlAndClickActions(Tree, 'Click (MouseUp)', mbLeft, CurrentNow, CompDown)
     else
-      AddFindControlAndClickActions(Tree, 'Drag', mbLeft, CurrentNow);
-  end; //CompUp.Handle =
+      AddFindControlAndClickActions(Tree, 'Select', mbLeft, CurrentNow, CompDown);
+  end //CompUp.Handle =
+  else
+  begin
+    if (Abs(FLeftButtonUp.Point.X - FLeftButtonDown.Point.X) < 6) and (Abs(FLeftButtonUp.Point.Y - FLeftButtonDown.Point.Y) < 6) then
+    begin
+      //AddFindControlAndClickActions(Tree, 'Click (MouseUp)', mbLeft, CurrentNow)     bad action
+    end
+    else
+    begin
+      AddToLog('Adding drag.. Down: ' + IntToStr(CompDown.Handle) + '  /  Up: ' + IntToStr(CompUp.Handle));
+      AddFindControlAndClickActions(Tree, CDragActionName, mbLeft, CurrentNow, CompDown);
+    end;
+  end;
+
+  AddToLog('Added Mouse Up on ' + IntToStr(CompUp.Handle));
 end;
 
 
@@ -1042,10 +1124,8 @@ var
 begin
   AddToLog('Right up on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
-  CompDown := GetWindowClassRec(FLastPosRight);
-  CompUp := GetWindowClassRec(FLastPos);
-
-  //if IsMenu then  Exit;
+  CompDown := FRightButtonDown.CompEvent;
+  CompUp := FRightButtonUp.CompEvent;
 
   if IsMenu(CompUp) and (CompUp.ComponentRectangle.Left = FLastPos.X) and (CompUp.ComponentRectangle.Top = FLastPos.Y) then //system menu
   begin                 //Handled only the case where the pop-up menu opens to the right-bottom of the mouse cursor.
@@ -1061,17 +1141,12 @@ begin
   if (CompUp.Handle = CompDown.Handle) and (Abs(FLastPos.X - FLastPosRight.X) < 6) and (Abs(FLastPos.Y - FLastPosRight.Y) < 6) then
   begin
     if not chkIncludeThisRecorder.Checked and
-      ((CompUp.Handle = Handle) or
-       (CompUp.Handle = chkIncludeThisRecorder.Handle) or
-       (CompUp.Handle = btnCopySelectedActionsToClipboard.Handle) or
-       (CompUp.Handle = btnClearRecording.Handle) or
-       (CompUp.Handle = chkRec.Handle) or
-       (CompUp.Handle = vstRec.Handle)) then
+      IsRecComponent(CompUp) then
       Exit;
 
     CurrentNow := Now;
     GetControlParentTree(CompUp, Tree);
-    AddFindControlAndClickActions(Tree, 'Right-Click', mbRight, CurrentNow);
+    AddFindControlAndClickActions(Tree, 'Right-Click', mbRight, CurrentNow, CompDown);
   end;
 end;
 
@@ -1085,23 +1160,18 @@ var
 begin
   AddToLog('Middle up on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
-  CompDown := GetWindowClassRec(FLastPosMiddle);
-  CompUp := GetWindowClassRec(FLastPos);
+  CompDown := FMiddleButtonDown.CompEvent;
+  CompUp := FMiddleButtonUp.CompEvent;
 
   if (CompUp.Handle = CompDown.Handle) and (Abs(FLastPos.X - FLastPosMiddle.X) < 6) and (Abs(FLastPos.Y - FLastPosMiddle.Y) < 6) then
   begin
     if not chkIncludeThisRecorder.Checked and
-      ((CompUp.Handle = Handle) or
-       (CompUp.Handle = chkIncludeThisRecorder.Handle) or
-       (CompUp.Handle = btnCopySelectedActionsToClipboard.Handle) or
-       (CompUp.Handle = btnClearRecording.Handle) or
-       (CompUp.Handle = chkRec.Handle) or
-       (CompUp.Handle = vstRec.Handle)) then
+      IsRecComponent(CompUp) then
       Exit;
 
     CurrentNow := Now;
     GetControlParentTree(CompUp, Tree);
-    AddFindControlAndClickActions(Tree, 'Middle-Click', mbMiddle, CurrentNow);
+    AddFindControlAndClickActions(Tree, 'Middle-Click', mbMiddle, CurrentNow, CompDown);
   end;
 end;
 

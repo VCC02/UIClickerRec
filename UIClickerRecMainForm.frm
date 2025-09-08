@@ -199,10 +199,10 @@ object frmUIClickerRecMain: TfrmUIClickerRecMain
         Text = '#'
       end    
       item
-        MinWidth = 115
+        MinWidth = 135
         Position = 1
         Text = 'Action name'
-        Width = 115
+        Width = 135
       end    
       item
         MinWidth = 100
