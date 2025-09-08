@@ -144,7 +144,13 @@ type
     procedure DisplayMouseButtonStates;
     function GetSelectedActions(var AActionsArr: TClkActionsRecArr): Integer;
     procedure CopySelectedActionsToClipboard;
-    procedure AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime; ACompDown: TCompRec);
+
+    procedure AddFindControlAction(var ATree: TCompRecArr; ACurrentNow: TDateTime; ALocalGroupID: string);
+    procedure AddFindControlAndClickActions(var ATree, ASrcTree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime);
+    procedure AddFindSubControlAction(AComp: TCompRec; ACurrentNow: TDateTime; ALocalGroupID: string);
+    procedure AddSetVarAsCacheControlAction(AComp: TCompRec; ACurrentNow: TDateTime; ALocalGroupID, AControlPrefix: string);
+    procedure AddClickAction(var ATree, ASrcTree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime; ALocalGroupID: string);
+
     procedure RemoveAction(ActionIndex: Integer; AClearSelectionAfterRemoving: Boolean = True; AUpdateRootNodeCount: Boolean = True);
     procedure RemoveSelectedActions;
     function IsRecComponent(AComp: TCompRec): Boolean;
@@ -551,6 +557,9 @@ begin
         acFindSubControl:
           CellText := FAllRecs[0].Actions[Node^.Index].FindSubControlOptions.MatchText;
 
+        acSetVar:
+          CellText := Copy(FAllRecs[0].Actions[Node^.Index].SetVarOptions.ListOfVarNames, 1, 30) + '...';
+
         else
           CellText := 'Unimplemented';
       end;
@@ -649,6 +658,8 @@ begin
 
   if (ActionIndex < 0) or (ActionIndex > Length(AActionDetails) - 1) then
     raise Exception.Create('Attempting to remove an action detail by an out of bounds index.');
+
+  AActionDetails[ActionIndex].ScrShot.Free;
 
   for i := ActionIndex to Length(AActionDetails) - 2 do
     AActionDetails[i] := AActionDetails[i + 1];
@@ -874,13 +885,10 @@ begin
 end;
 
 
-procedure TfrmUIClickerRecMain.AddFindControlAndClickActions(var ATree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime; ACompDown: TCompRec);
+procedure TfrmUIClickerRecMain.AddFindControlAction(var ATree: TCompRecArr; ACurrentNow: TDateTime; ALocalGroupID: string);
 var
   i: Integer;
-  LocalGroupID: string;
 begin
-  LocalGroupID := DateTimeToStr(ACurrentNow) + IntToStr(GetTickCount64);
-
   for i := Length(ATree) - 1 downto 0 do
     //if CompUp.Handle <> GetLastRecordedHandle(FAllRecs[0].Details) then  //makes no sense to check this, when starting from the top of the tree
     begin
@@ -891,7 +899,7 @@ begin
       FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := ATree[i].Handle;
       FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
       ScreenShot(ATree[i].Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, ATree[i].ComponentRectangle.Width, ATree[i].ComponentRectangle.Height);
-      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := LocalGroupID;
+      FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := ALocalGroupID;
 
       FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindControl;
       FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindControl';
@@ -903,53 +911,86 @@ begin
       FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.MatchClassName := ATree[i].ClassName;
       FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindControlOptions.UseWholeScreen := i = Length(ATree) - 1;
     end;
+end;
 
-  if chkIncludeFindSubControl.Checked then
-  begin
-    if (ATree[i].ClassName = '#32768') or (ATree[i].ClassName = '#32770') or (ATree[i].ClassName = 'Button') then
-      ATree[i].Text := StringReplace(ATree[i].Text, '&', '', [rfReplaceAll]);
 
-    SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
-    SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := ACurrentNow;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := ATree[i].Handle;
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
-    ScreenShot(ATree[i].Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, ATree[i].ComponentRectangle.Width, ATree[i].ComponentRectangle.Height);
-    FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := LocalGroupID;
+procedure TfrmUIClickerRecMain.AddFindSubControlAction(AComp: TCompRec; ACurrentNow: TDateTime; ALocalGroupID: string);
+begin
+  if (AComp.ClassName = '#32768') or (AComp.ClassName = '#32770') or (AComp.ClassName = 'Button') then
+    AComp.Text := StringReplace(AComp.Text, '&', '', [rfReplaceAll]);
 
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindSubControl;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindSubControl';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionTimeout := 1000;
+  SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
+  SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := ACurrentNow;
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := AComp.Handle;
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
+  ScreenShot(AComp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, AComp.ComponentRectangle.Width, AComp.ComponentRectangle.Height);
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := ALocalGroupID;
 
-    GetDefaultPropertyValues_FindSubControl(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions);
-    SetLength(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText, 3);
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := ATree[i].Text;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].ForegroundColor := '$Color_WindowText$';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].BackgroundColor := '$Color_BtnFace$';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].FontName := 'Tahoma';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].FontSize := 8;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].FontQuality := fqNonAntialiased;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acFindSubControl;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'FindSubControl';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionTimeout := 1000;
 
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := ATree[i].Text;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].ForegroundColor := '$Color_WindowText$';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].BackgroundColor := '$Color_BtnFace$';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].FontName := 'Segoe UI';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].FontSize := 9;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].FontQuality := fqAntialiased;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.ColorError := '10';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.AllowedColorErrorCount := '20';
 
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := ATree[i].Text;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].ForegroundColor := '$Color_WindowText$';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].BackgroundColor := '$Color_BtnFace$';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].FontName := 'Segoe UI';
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].FontSize := 9;
-    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].FontQuality := fqCleartype;
-    //This will require more complex settings, with more profiles
-    //The colors will have to be obtained from the screnshot and tested by UIClicker
-  end;
+  GetDefaultPropertyValues_FindSubControl(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions);
+  SetLength(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText, 3);
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := AComp.Text;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].ForegroundColor := '$Color_WindowText$';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].BackgroundColor := '$Color_BtnFace$';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].FontName := 'Tahoma';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].FontSize := 8;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[0].FontQuality := fqNonAntialiased;
 
-  //Click
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := AComp.Text;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].ForegroundColor := '$Color_WindowText$';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].BackgroundColor := '$Color_BtnFace$';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].FontName := 'Segoe UI';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].FontSize := 9;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[1].FontQuality := fqAntialiased;
+
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchText := AComp.Text;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].ForegroundColor := '$Color_WindowText$';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].BackgroundColor := '$Color_BtnFace$';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].FontName := 'Segoe UI';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].FontSize := 9;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].FindSubControlOptions.MatchBitmapText[2].FontQuality := fqCleartype;
+  //This will require more complex settings, with more profiles
+  //The colors will have to be obtained from the screnshot and tested by UIClicker
+end;
+
+
+procedure TfrmUIClickerRecMain.AddSetVarAsCacheControlAction(AComp: TCompRec; ACurrentNow: TDateTime; ALocalGroupID, AControlPrefix: string);
+begin
+  SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
+  SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := ACurrentNow;
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ClickPoint := FLastPosLeft; //the MouseDown event
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := AComp.Handle;
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
+  ScreenShot(AComp.Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, AComp.ComponentRectangle.Width, AComp.ComponentRectangle.Height);
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := ALocalGroupID;
+
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.Action := acSetVar;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionName := 'CacheControl';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionEnabled := True;
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ActionOptions.ActionTimeout := 0;
+
+  GetDefaultPropertyValues_SetVar(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].SetVarOptions);
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].SetVarOptions.ListOfVarNames := '$' + AControlPrefix + 'Left$$' + AControlPrefix + 'Top$$' + AControlPrefix + 'Right$$' + AControlPrefix + 'Bottom$$' + AControlPrefix + 'Width$$' + AControlPrefix + 'Height$$' + AControlPrefix + 'Text$$' + AControlPrefix + 'Class$$' + AControlPrefix + 'Handle$';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].SetVarOptions.ListOfVarValues := '$Control_Left$$Control_Top$$Control_Right$$Control_Bottom$$Control_Width$$Control_Height$$Control_Text$$Control_Class$$Control_Handle$';
+  FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].SetVarOptions.ListOfVarEvalBefore := '111111111';
+end;
+
+
+const
+  CSrcPrefix = 'Src_';
+
+procedure TfrmUIClickerRecMain.AddClickAction(var ATree, ASrcTree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime; ALocalGroupID: string);
+begin
   SetLength(FAllRecs[0].Actions, Length(FAllRecs[0].Actions) + 1);
   SetLength(FAllRecs[0].Details, Length(FAllRecs[0].Details) + 1);
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].Timestamp := ACurrentNow;
@@ -957,7 +998,7 @@ begin
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ControlHandle := ATree[0].Handle;
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot := TBitmap.Create;
   ScreenShot(ATree[0].Handle, FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot, 0, 0, ATree[0].ComponentRectangle.Width, ATree[0].ComponentRectangle.Height);
-  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := LocalGroupID;
+  FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].GroupID := ALocalGroupID;
 
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Pen.Color := clRed;
   FAllRecs[0].Details[Length(FAllRecs[0].Details) - 1].ScrShot.Canvas.Line(ATree[0].MouseXOffset, 0, ATree[0].MouseXOffset, ATree[0].ComponentRectangle.Height); //V
@@ -969,20 +1010,77 @@ begin
   GetDefaultPropertyValues_Click(FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions);
   FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.MouseButton := AMouseButton;
 
-  if AClickActionName = CDragActionName then
+  if AClickActionName = CDragActionName then    //different components between source and destination
   begin
     FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.ClickType := CClickType_Drag;
-    //ToDo:
-    //ACompDown is the source of dragging, while ATree[0] is the destination.
+
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XClickPointReference := xrefVar;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YClickPointReference := yrefVar;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XClickPointVar := '$' + CSrcPrefix + 'Left$';  //cached from ASrcTree[0]
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YClickPointVar := '$' + CSrcPrefix + 'Top$';   //cached from ASrcTree[0]
+
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XClickPointReferenceDest := xrefVar;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YClickPointReferenceDest := yrefVar;
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XClickPointVarDest := '$Control_Left$'; //from ATree[0]
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YClickPointVarDest := '$Control_Top$';  //from ATree[0]
+
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XOffset := IntToStr(ASrcTree[0].MouseXOffset);
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YOffset := IntToStr(ASrcTree[0].MouseYOffset);
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XOffsetDest := IntToStr(ATree[0].MouseXOffset);
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YOffsetDest := IntToStr(ATree[0].MouseYOffset);
   end;
 
-  if AClickActionName = CSelectActionName then
+  if AClickActionName = CSelectActionName then   //same component on source and destination
   begin
     FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.ClickType := CClickType_Drag;
-    //ToDo:
-    //ACompDown is the source of dragging, while ATree[0] is the destination.
+
+    //FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XClickPointReference := xrefVar;
+    //FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YClickPointReference := yrefVar;
+    //FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XClickPointVar := '$Control_Left$';  //from ATree[0]
+    //FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YClickPointVar := '$Control_Top$';   //from ATree[0]
+    //
+    //FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XClickPointReferenceDest := xrefVar;
+    //FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YClickPointReferenceDest := yrefVar;
+    //FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XClickPointVarDest := '$Control_Left$'; //from ATree[0]
+    //FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YClickPointVarDest := '$Control_Top$';  //from ATree[0]
+
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XOffset := IntToStr(ASrcTree[0].MouseXOffset);
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YOffset := IntToStr(ASrcTree[0].MouseYOffset);
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.XOffsetDest := IntToStr(ATree[0].MouseXOffset);
+    FAllRecs[0].Actions[Length(FAllRecs[0].Actions) - 1].ClickOptions.YOffsetDest := IntToStr(ATree[0].MouseYOffset);
+  end;
+end;
+
+
+procedure TfrmUIClickerRecMain.AddFindControlAndClickActions(var ATree, ASrcTree: TCompRecArr; AClickActionName: string; AMouseButton: TMouseButton; ACurrentNow: TDateTime);
+var
+  LocalGroupID: string;
+begin
+  LocalGroupID := DateTimeToStr(ACurrentNow) + IntToStr(GetTickCount64);
+
+  if AClickActionName = CDragActionName then    //no CSelectActionName here
+  begin
+    //Source tree:
+    if Length(ASrcTree) = 0 then
+      raise Exception.Create('A valid source tree is required.');
+
+    AddFindControlAction(ASrcTree, ACurrentNow, LocalGroupID);
+
+    if chkIncludeFindSubControl.Checked then
+      AddFindSubControlAction(ASrcTree[0], ACurrentNow, LocalGroupID);
+
+    //SetVar
+    AddSetVarAsCacheControlAction(ASrcTree[0], ACurrentNow, LocalGroupID, CSrcPrefix);
   end;
 
+  //Destination tree:
+  AddFindControlAction(ATree, ACurrentNow, LocalGroupID);
+
+  if chkIncludeFindSubControl.Checked then
+    AddFindSubControlAction(ATree[0], ACurrentNow, LocalGroupID);
+
+  //Click / Drag / Select
+  AddClickAction(ATree, ASrcTree, AClickActionName, AMouseButton, ACurrentNow, LocalGroupID);
 
   vstRec.RootNodeCount := Length(FAllRecs[0].Actions);
   vstRec.ClearSelection;
@@ -1033,7 +1131,7 @@ procedure TfrmUIClickerRecMain.HandleOnLeftButtonDown;
 var
   CompUp: TCompRec;
   CurrentNow: TDateTime;
-  Tree: TCompRecArr;
+  Tree, EmptyTree: TCompRecArr;
 begin
   FLastPosLeft := FLastPos;
   AddToLog('Left down on ' + GetComponentInfoAsStringAtPoint(FLastPos));
@@ -1051,7 +1149,7 @@ begin
 
   CurrentNow := Now;
   GetControlParentTree(CompUp, Tree);
-  AddFindControlAndClickActions(Tree, 'Click (MouseDown)', mbLeft, CurrentNow, CompUp);
+  AddFindControlAndClickActions(Tree, EmptyTree, 'Click (MouseDown)', mbLeft, CurrentNow);
 end;
 
 
@@ -1074,7 +1172,7 @@ var
   CompDown: TCompRec;
   CompUp: TCompRec;
   CurrentNow: TDateTime;
-  Tree: TCompRecArr;
+  Tree, SrcTree, EmptyTree: TCompRecArr;
 begin
   AddToLog('Left up on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
@@ -1094,20 +1192,23 @@ begin
   if CompUp.Handle = CompDown.Handle then
   begin
     if (Abs(FLeftButtonUp.Point.X - FLeftButtonDown.Point.X) < 6) and (Abs(FLeftButtonUp.Point.Y - FLeftButtonDown.Point.Y) < 6) then
-      AddFindControlAndClickActions(Tree, 'Click (MouseUp)', mbLeft, CurrentNow, CompDown)
+      AddFindControlAndClickActions(Tree, EmptyTree, 'Click (MouseUp)', mbLeft, CurrentNow)
     else
-      AddFindControlAndClickActions(Tree, 'Select', mbLeft, CurrentNow, CompDown);
+    begin
+      GetControlParentTree(CompDown, SrcTree);
+      AddFindControlAndClickActions(Tree, SrcTree, CSelectActionName, mbLeft, CurrentNow);
+    end;
   end //CompUp.Handle =
   else
   begin
     if (Abs(FLeftButtonUp.Point.X - FLeftButtonDown.Point.X) < 6) and (Abs(FLeftButtonUp.Point.Y - FLeftButtonDown.Point.Y) < 6) then
     begin
-      //AddFindControlAndClickActions(Tree, 'Click (MouseUp)', mbLeft, CurrentNow)     bad action
+      //AddFindControlAndClickActions(Tree, EmptyTree, 'Click (MouseUp)', mbLeft, CurrentNow)     bad action
     end
     else
     begin
-      AddToLog('Adding drag.. Down: ' + IntToStr(CompDown.Handle) + '  /  Up: ' + IntToStr(CompUp.Handle));
-      AddFindControlAndClickActions(Tree, CDragActionName, mbLeft, CurrentNow, CompDown);
+      GetControlParentTree(CompDown, SrcTree);
+      AddFindControlAndClickActions(Tree, SrcTree, CDragActionName, mbLeft, CurrentNow);
     end;
   end;
 
@@ -1120,7 +1221,7 @@ var
   CompDown: TCompRec;
   CompUp: TCompRec;
   CurrentNow: TDateTime;
-  Tree: TCompRecArr;
+  Tree, EmptyTree: TCompRecArr;
 begin
   AddToLog('Right up on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
@@ -1146,7 +1247,7 @@ begin
 
     CurrentNow := Now;
     GetControlParentTree(CompUp, Tree);
-    AddFindControlAndClickActions(Tree, 'Right-Click', mbRight, CurrentNow, CompDown);
+    AddFindControlAndClickActions(Tree, EmptyTree, 'Right-Click', mbRight, CurrentNow);
   end;
 end;
 
@@ -1156,7 +1257,7 @@ var
   CompDown: TCompRec;
   CompUp: TCompRec;
   CurrentNow: TDateTime;
-  Tree: TCompRecArr;
+  Tree, EmptyTree: TCompRecArr;
 begin
   AddToLog('Middle up on ' + GetComponentInfoAsStringAtPoint(FLastPos));
 
@@ -1171,7 +1272,7 @@ begin
 
     CurrentNow := Now;
     GetControlParentTree(CompUp, Tree);
-    AddFindControlAndClickActions(Tree, 'Middle-Click', mbMiddle, CurrentNow, CompDown);
+    AddFindControlAndClickActions(Tree, EmptyTree, 'Middle-Click', mbMiddle, CurrentNow);
   end;
 end;
 
